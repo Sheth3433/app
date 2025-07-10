@@ -1,78 +1,80 @@
-import gradio as gr
+import streamlit as st
 from transformers import pipeline, AutoModelForMaskedLM, AutoTokenizer
-import matplotlib.pyplot as plt
 import networkx as nx
+import matplotlib.pyplot as plt
 
-# --------- 1. Sentence Classification ---------
+# ---------- Sentence Classification ----------
 classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
 labels = ["Air Pollution", "Water Conservation", "Climate Change", "Waste Management", "Wildlife Protection"]
 
-def classify_sentence(sentence):
-    result = classifier(sentence, candidate_labels=labels)
+def classify(text):
+    result = classifier(text, labels)
     return result['labels'][0]
 
-# --------- 2. Image Generation ---------
-image_gen = pipeline("text-to-image-generation", model="CompVis/stable-diffusion-v1-4")
-
+# ---------- Image Generation Placeholder ----------
 def generate_image(prompt):
-    return image_gen(prompt)[0]
+    st.info("Image generation is disabled in Streamlit Cloud for safety. Use Hugging Face Spaces for this feature.")
+    return None
 
-# --------- 3. Named Entity Recognition + Graph Map ---------
-ner_model = pipeline("ner", grouped_entities=True)
+# ---------- NER + Graph ----------
+ner_pipeline = pipeline("ner", grouped_entities=True)
 
-def ner_graph(text):
-    entities = ner_model(text)
+def draw_graph(text):
+    ents = ner_pipeline(text)
     G = nx.Graph()
-    for ent in entities:
-        G.add_node(ent['word'], label=ent['entity_group'])
+    for e in ents:
+        G.add_node(e['word'])
+    for i in range(len(ents)-1):
+        G.add_edge(ents[i]['word'], ents[i+1]['word'])
 
-    # Create dummy connections
-    for i in range(len(entities) - 1):
-        G.add_edge(entities[i]['word'], entities[i+1]['word'])
+    fig, ax = plt.subplots()
+    nx.draw(G, with_labels=True, node_color='lightgreen', font_size=10, ax=ax)
+    return fig
 
-    # Plot graph
-    plt.figure(figsize=(6, 4))
-    pos = nx.spring_layout(G)
-    nx.draw(G, pos, with_labels=True, node_color='lightgreen', font_weight='bold')
-    return plt
-
-# --------- 4. Fill in the Blank (Masked Language Modeling) ---------
+# ---------- Masked Language Model ----------
 mask_model = AutoModelForMaskedLM.from_pretrained("bert-base-uncased")
 mask_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 fill_mask = pipeline("fill-mask", model=mask_model, tokenizer=mask_tokenizer)
 
-def fill_blank(text):
+def fill_in_blank(text):
     if "[MASK]" not in text:
-        return "Please include [MASK] in your sentence."
-    result = fill_mask(text)
-    return result[0]['sequence']
+        return "Add [MASK] token to predict missing word."
+    prediction = fill_mask(text)
+    return prediction[0]['sequence']
 
-# --------- Gradio Interface ---------
-with gr.Blocks() as demo:
-    gr.Markdown("🌍 **Environmental AI Assistant - Powered by Hugging Face 🤗 + Gradio**")
+# ---------- Streamlit Tabs ----------
+st.set_page_config(page_title="Environmental AI Assistant")
+st.title("🌱 Environmental AI Assistant")
 
-    with gr.Tab("1️⃣ Sentence Classification"):
-        sentence = gr.Textbox(placeholder="Enter a sentence related to environment")
-        prediction = gr.Textbox(label="Prediction")
-        classify_btn = gr.Button("Classify")
-        classify_btn.click(classify_sentence, sentence, prediction)
+tab1, tab2, tab3, tab4 = st.tabs([
+    "1️⃣ Sentence Classification", 
+    "2️⃣ Image Generation", 
+    "3️⃣ NER with Graph", 
+    "4️⃣ Fill in the Blank"
+])
 
-    with gr.Tab("2️⃣ Image Generation"):
-        prompt = gr.Textbox(placeholder="Describe the environmental scene")
-        output_img = gr.Image()
-        img_btn = gr.Button("Generate")
-        img_btn.click(generate_image, prompt, output_img)
+with tab1:
+    st.subheader("Classify Environmental Sentence")
+    inp = st.text_input("Enter a sentence")
+    if st.button("Classify"):
+        st.success(f"Prediction: **{classify(inp)}**")
 
-    with gr.Tab("3️⃣ NER with Graph Map"):
-        ner_input = gr.Textbox(placeholder="Enter text for entity recognition")
-        ner_output = gr.Plot()
-        ner_btn = gr.Button("Extract Entities and Show Graph")
-        ner_btn.click(ner_graph, ner_input, ner_output)
+with tab2:
+    st.subheader("Image Generation (Disabled for Streamlit Cloud)")
+    prompt = st.text_input("Enter image prompt")
+    if st.button("Generate Image"):
+        generate_image(prompt)
 
-    with gr.Tab("4️⃣ Fill the Blank (Masked Language Modeling)"):
-        mask_input = gr.Textbox(placeholder="Enter a sentence using [MASK] for missing word")
-        mask_output = gr.Textbox(label="Predicted Sentence")
-        mask_btn = gr.Button("Fill Blank")
-        mask_btn.click(fill_blank, mask_input, mask_output)
+with tab3:
+    st.subheader("Named Entity Recognition Graph")
+    ner_input = st.text_area("Enter text")
+    if st.button("Visualize Graph"):
+        fig = draw_graph(ner_input)
+        st.pyplot(fig)
 
-demo.launch()
+with tab4:
+    st.subheader("Fill in the Blank (Masked Language)")
+    masked = st.text_input("Enter a sentence with [MASK]")
+    if st.button("Fill Blank"):
+        result = fill_in_blank(masked)
+        st.info(result)
