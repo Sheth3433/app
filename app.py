@@ -4,7 +4,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 # ---------- Sentence Classification ----------
-classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", framework="pt")
 labels = ["Air Pollution", "Water Conservation", "Climate Change", "Waste Management", "Wildlife Protection"]
 
 def classify(text):
@@ -13,7 +13,7 @@ def classify(text):
 
 # ---------- Image Generation Placeholder ----------
 def generate_image(prompt):
-    st.info("Image generation is disabled in Streamlit Cloud for safety. Use Hugging Face Spaces for this feature.")
+    st.info("Image generation is disabled in Streamlit Cloud. Please use Hugging Face Spaces for this feature.")
     return None
 
 # ---------- NER + Graph ----------
@@ -42,7 +42,7 @@ def fill_in_blank(text):
     prediction = fill_mask(text)
     return prediction[0]['sequence']
 
-# ---------- Streamlit Tabs ----------
+# ---------- Streamlit UI ----------
 st.set_page_config(page_title="Environmental AI Assistant")
 st.title("🌱 Environmental AI Assistant")
 
@@ -60,7 +60,7 @@ with tab1:
         st.success(f"Prediction: **{classify(inp)}**")
 
 with tab2:
-    st.subheader("Image Generation (Disabled for Streamlit Cloud)")
+    st.subheader("Image Generation (Not available in Streamlit Cloud)")
     prompt = st.text_input("Enter image prompt")
     if st.button("Generate Image"):
         generate_image(prompt)
