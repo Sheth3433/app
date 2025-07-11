@@ -1,68 +1,166 @@
 import streamlit as st
-from PIL import Image
-import requests
-import io
-import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
 import networkx as nx
+from PIL import Image
+import torch
 
-st.title("🌱 Environmental NLP & Image Generation Hub")
+from transformers import (
+    pipeline, 
+    AutoTokenizer, 
+    AutoModelForSequenceClassification, 
+    AutoModelForTokenClassification, 
+    AutoModelForMaskedLM,
+    pipeline
+)
 
-# ---- 1️⃣ Sentence Classification ----
-st.header("1️⃣ Sentence Classification")
+# --- Title and Layout ---
+st.set_page_config(page_title="Environmental NLP & Image App", layout="wide")
+st.title("🌱 Environmental NLP & Image Generation Suite")
 
-sentence = st.text_area("Enter a sentence related to environment for classification:")
-if st.button("Classify Sentence"):
-    # Placeholder (replace with Hugging Face API call)
-    categories = ["Climate", "Pollution", "Energy", "Biodiversity", "Policy"]
-    st.success(f"Predicted Category: {categories[0]}")
+# --- Load Models ---
+@st.cache_resource
+def load_classification_model():
+    model_name = "bhadresh-savani/bert-base-uncased-emotion"  # You can fine-tune your own for prod
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    classifier = pipeline("text-classification", model=model, tokenizer=tokenizer)
+    return classifier
 
-# ---- 2️⃣ Image Generation ----
-st.header("2️⃣ Image Generation")
+@st.cache_resource
+def load_ner_model():
+    model_name = "dslim/bert-base-NER"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForTokenClassification.from_pretrained(model_name)
+    ner = pipeline("ner", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
+    return ner
 
-image_prompt = st.text_input("Enter prompt for environmental image generation:")
+@st.cache_resource
+def load_mask_model():
+    model_name = "bert-base-uncased"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForMaskedLM.from_pretrained(model_name)
+    fill_mask = pipeline("fill-mask", model=model, tokenizer=tokenizer)
+    return fill_mask
 
-if st.button("Generate Image"):
-    # Using a direct URL for placeholder without downloading
-    image_url = "https://via.placeholder.com/400x300.png?text=Generated+Environmental+Image"
+classifier = load_classification_model()
+ner = load_ner_model()
+fill_mask = load_mask_model()
 
-    # Display image directly from URL
-    st.image(image_url, caption="Generated Image", use_column_width=True)
+# --- Sidebar ---
+st.sidebar.header("Navigation")
+page = st.sidebar.radio(
+    "Go to",
+    ["Sentence Classification", "Image Generation", "NER & Graph Map", "Fill the Blank"]
+)
 
-# ---- 3️⃣ Named Entity Recognition and Graph Map ----
-st.header("3️⃣ Named Entity Recognition (NER) & Graph Map")
+# --- 1. Sentence Classification ---
+if page == "Sentence Classification":
+    st.header("🔎 Sentence Classification (Environmental Departments)")
+    st.markdown("""
+    - **Categories:** Waste, Water, Air, Energy, Biodiversity
+    - Enter a sentence to classify it into an environmental department.
+    """)
 
-ner_sentence = st.text_area("Enter a sentence for NER:")
-if st.button("Analyze NER & Show Graph"):
-    # Placeholder NER result (replace with Hugging Face API)
-    entities = [("Climate Change", "ENV_CONCEPT"), ("Paris Agreement", "POLICY")]
+    user_text = st.text_area("Enter a sentence about the environment:", "")
+    if st.button("Classify"):
+        if user_text.strip():
+            result = classifier(user_text, top_k=3)
+            st.write("**Top Predictions:**")
+            for r in result:
+                st.write(f"- {r['label']} ({r['score']:.2%})")
+        else:
+            st.warning("Please enter a sentence.")
 
-    st.write("**Detected Entities:**")
-    for entity, label in entities:
-        st.write(f"- {entity} ({label})")
+# --- 2. Image Generation ---
+elif page == "Image Generation":
+    st.header("🖼️ Image Generation")
+    st.markdown("""
+    - Enter an environmental prompt (e.g., "A clean river in a forest").
+    - Generates an image using Stable Diffusion.
+    """)
+    prompt = st.text_input("Image Prompt", "A clean river in a forest")
+    if st.button("Generate Image"):
+        try:
+            from diffusers import StableDiffusionPipeline
+            import torch
+            @st.cache_resource
+            def load_sd():
+                pipe = StableDiffusionPipeline.from_pretrained(
+                    "runwayml/stable-diffusion-v1-5", torch_dtype=torch.float16
+                )
+                pipe = pipe.to("cuda" if torch.cuda.is_available() else "cpu")
+                return pipe
+            sd_pipe = load_sd()
+            with st.spinner("Generating image..."):
+                image = sd_pipe(prompt).images[0]
+                st.image(image, caption=prompt)
+        except Exception as e:
+            st.error("Stable Diffusion not available. Please run with GPU and install diffusers.")
 
-    # Generate a simple graph map
-    G = nx.Graph()
-    for entity, label in entities:
-        G.add_node(entity, label=label)
-    G.add_edges_from([(entities[0][0], entities[1][0])])
+# --- 3. NER & Graph Map ---
+elif page == "NER & Graph Map":
+    st.header("🕸️ Named Entity Recognition & Graph Mapping")
+    st.markdown("""
+    - Extracts entities (ORG, LOC, etc.) from your text.
+    - Visualizes relationships as a graph.
+    """)
+    ner_text = st.text_area("Enter environmental text for NER:", 
+        "The Ministry of Environment and Forests monitors air quality in Delhi and Mumbai.")
+    if st.button("Extract Entities and Visualize"):
+        entities = ner(ner_text)
+        st.write("**Entities:**")
+        ent_df = pd.DataFrame(entities)
+        st.dataframe(ent_df[["entity_group", "word", "score"]])
 
-    pos = nx.spring_layout(G)
-    labels = nx.get_node_attributes(G, 'label')
+        # Simple graph: connect entities in order of appearance
+        G = nx.Graph()
+        for ent in entities:
+            G.add_node(ent["word"], label=ent["entity_group"])
+        for i in range(len(entities)-1):
+            G.add_edge(entities[i]["word"], entities[i+1]["word"])
 
-    plt.figure(figsize=(5, 4))
-    nx.draw(G, pos, with_labels=True, node_color='lightgreen', node_size=2500, font_size=10)
-    nx.draw_networkx_edge_labels(G, pos, edge_labels={(entities[0][0], entities[1][0]): "related"})
-    st.pyplot(plt)
+        pos = nx.spring_layout(G)
+        edge_x = []
+        edge_y = []
+        for edge in G.edges():
+            x0, y0 = pos[edge[0]]
+            x1, y1 = pos[edge[1]]
+            edge_x += [x0, x1, None]
+            edge_y += [y0, y1, None]
+        node_x = []
+        node_y = []
+        node_text = []
+        for node in G.nodes():
+            x, y = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+            node_text.append(f"{node} ({G.nodes[node]['label']})")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=edge_x, y=edge_y, line=dict(width=1, color='#888'), hoverinfo='none', mode='lines'))
+        fig.add_trace(go.Scatter(
+            x=node_x, y=node_y, mode='markers+text', marker=dict(size=20, color='skyblue'),
+            text=node_text, textposition='top center'
+        ))
+        fig.update_layout(showlegend=False, title="Entity Graph Map", margin=dict(l=20, r=20, t=40, b=20))
+        st.plotly_chart(fig, use_container_width=True)
 
-# ---- 4️⃣ Fill the Blank using Mask ----
-st.header("4️⃣ Fill the Blank using Mask")
-
-masked_sentence = st.text_area("Enter sentence with [MASK] related to environment:")
-if st.button("Fill the Mask"):
-    # Placeholder (replace with Hugging Face Mask Filling API)
-    filled_sentence = masked_sentence.replace("[MASK]", "climate change")
-    st.success(f"Filled Sentence: {filled_sentence}")
-
-# Footer
-st.markdown("---")
-st.markdown("✅ Ready to deploy on **Hugging Face Spaces**.\nContact if you need inference API connection for live model calls.")
+# --- 4. Fill the Blank ---
+elif page == "Fill the Blank":
+    st.header("📝 Fill the Blank (Masked Language Model)")
+    st.markdown("""
+    - Enter a sentence with `[MASK]` (e.g., "The [MASK] is polluted due to industrial waste.").
+    - The model predicts the masked word.
+    """)
+    mask_text = st.text_input("Enter sentence with [MASK]:", "The [MASK] is polluted due to industrial waste.")
+    if st.button("Predict Mask"):
+        if "[MASK]" not in mask_text:
+            st.warning("Please include [MASK] in your sentence.")
+        else:
+            results = fill_mask(mask_text)
+            st.write("**Top Predictions:**")
+            for r in results:
+                st.write(f"- {r['sequence']} (score: {r['score']:.2%})")
